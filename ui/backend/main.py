@@ -22,7 +22,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from temporalio.client import Client
+from temporalio.client import Client, WorkflowUpdateStage
 from temporalio.contrib.pydantic import pydantic_data_converter
 from temporalio.envconfig import ClientConfig
 
@@ -39,6 +39,15 @@ from openai_agents.workflows.research_agents.research_models import (
 load_dotenv()
 
 TEMPORAL_TASK_QUEUE = os.getenv("TEMPORAL_TASK_QUEUE", "research-queue")
+
+
+def get_temporal_ui_base_url() -> str:
+    """Build the Temporal UI base URL for workflow links."""
+    host = temporal_config.get("target_host", "localhost:7233")
+    namespace = temporal_config.get("namespace", "default")
+    if "localhost" in host or "127.0.0.1" in host:
+        return f"http://localhost:8233/namespaces/{namespace}/workflows"
+    return f"https://cloud.temporal.io/namespaces/{namespace}/workflows"
 
 
 # ============================================
@@ -162,22 +171,31 @@ async def start_research(request: StartResearchRequest):
     client = await get_temporal_client()
     workflow_id = f"interactive-research-{uuid.uuid4().hex[:8]}"
 
-    handle = await client.start_workflow(
+    await client.start_workflow(
         InteractiveResearchWorkflow.run,
         args=[None, False],
         id=workflow_id,
         task_queue=TEMPORAL_TASK_QUEUE,
     )
 
-    status = await handle.execute_update(
-        InteractiveResearchWorkflow.start_research,
-        UserQueryInput(query=request.query.strip()),
-    )
-
     return {
         "workflow_id": workflow_id,
         "status": "started",
+        "temporal_ui_url": f"{get_temporal_ui_base_url()}/{workflow_id}",
     }
+
+
+@app.post("/api/initialize/{workflow_id}")
+async def initialize_research(workflow_id: str, request: StartResearchRequest):
+    """Send the start_research update to an already-started workflow."""
+    client = await get_temporal_client()
+    handle = client.get_workflow_handle(workflow_id)
+    await handle.start_update(
+        InteractiveResearchWorkflow.start_research,
+        UserQueryInput(query=request.query.strip()),
+        wait_for_stage=WorkflowUpdateStage.ACCEPTED,
+    )
+    return {"status": "accepted"}
 
 
 @app.get("/api/status/{workflow_id}")

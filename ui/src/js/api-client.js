@@ -26,6 +26,22 @@ class ResearchClient {
         return data;
     }
 
+    async initializeResearch(query, workflowId) {
+        const response = await fetch(`${this.baseUrl}/api/initialize/${workflowId}`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ query })
+        });
+
+        if (!response.ok) {
+            throw new Error('Failed to initialize research');
+        }
+
+        return await response.json();
+    }
+
     async getStatus(workflowId = null) {
         const id = workflowId || this.workflowId;
         if (!id) {

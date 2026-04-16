@@ -19,6 +19,7 @@
         <!-- Main Heading -->
         <h1 class="main-heading">Build Durable Agents</h1>
         <p class="subtitle">Powered by Temporal</p>
+        <a class="workflow-id-link" id="workflowIdLink" target="_blank" rel="noopener noreferrer"></a>
 
         <!-- Chat Container -->
         <div class="chat-container" id="chatContainer">
@@ -164,9 +165,18 @@
 
             try {
                 if (!workflowId) {
-                    // First submission - start new research workflow
+                    // First submission - start workflow and show ID immediately
                     const result = await client.startResearch(query);
                     workflowId = result.workflow_id;
+
+                    // Show workflow ID link right away
+                    const link = document.getElementById('workflowIdLink');
+                    link.href = result.temporal_ui_url || `http://localhost:8233/namespaces/default/workflows/${workflowId}`;
+                    link.textContent = workflowId;
+                    link.classList.add('visible');
+
+                    // Send the research query to the workflow (needs worker)
+                    await client.initializeResearch(query, workflowId);
                 } else {
                     // Subsequent submissions - answer clarification question
                     await client.submitAnswer(query, workflowId, currentQuestionIndex);
