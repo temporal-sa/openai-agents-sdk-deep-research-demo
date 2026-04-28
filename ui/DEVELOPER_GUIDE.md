@@ -1,5 +1,11 @@
 # Temporal Research UI - Developer Integration Guide
 
+## Authentication
+
+All `/api/*` endpoints (except `/api/health`) require a Firebase ID token in the `Authorization: Bearer <token>` header. The frontend's `api-client.js` injects this automatically (token sourced from `auth.js`) once the user has signed in via Google. Tokens whose email is not verified or doesn't end in `@temporal.io` are rejected with `401`/`403`.
+
+For local dev, set `AUTH_DISABLED=true` in `.env` to bypass verification entirely. The backend logs the active auth mode at startup (look for `[auth]` lines).
+
 ## API Contract
 
 The frontend expects these exact response shapes:
@@ -103,19 +109,18 @@ The frontend handles these status values:
 
 ## Frontend Files
 
-| File            | Purpose                        |
-| --------------- | ------------------------------ |
-| `index.html`    | Chat interface (entry point)   |
-| `success.html`  | Results display with accordion |
-| `api-client.js` | JavaScript API wrapper         |
+| File            | Purpose                                           |
+| --------------- | ------------------------------------------------- |
+| `index.html`    | Chat interface (entry point)                      |
+| `success.html`  | Results display with accordion                    |
+| `api-client.js` | JavaScript API wrapper (attaches Bearer token)    |
+| `auth.js`       | Firebase auth gate, sign-in card, `getIdToken()`  |
 
 ## Frontend Configuration
 
-To change the API URL, edit `index.html` line 264:
+To change the API URL, edit the `API_BASE_URL` constant in `index.html` (currently `http://localhost:8234`).
 
-```javascript
-const API_BASE_URL = "http://localhost:8233";
-```
+To plug into a Firebase project, replace the `REPLACE_ME` values in the `window.FIREBASE_CONFIG` block at the top of `index.html` and `success.html` with the project's web-config values from the Firebase console (apiKey, authDomain, projectId).
 
 ## Integration Checklist
 
@@ -124,6 +129,7 @@ const API_BASE_URL = "http://localhost:8233";
 - [ ] Implement POST /api/answer/{workflow_id}
 - [ ] Implement GET /api/result/{workflow_id}
 - [ ] Configure Environment Configuration Profile / .env file with Temporal connection details
+- [ ] Configure auth: either set `AUTH_DISABLED=true` for local dev, or populate `FIREBASE_PROJECT_ID` + `window.FIREBASE_CONFIG` for a real deploy
 - [ ] Start Temporal server or connect to Cloud
 - [ ] Start worker (uv run openai_agents/run_worker.py)
 - [ ] Test full flow
@@ -140,7 +146,8 @@ For UI testing without Temporal, you can:
 ```
 ui/
 ├── backend/
-│   └── main.py              # FastAPI server (configure here)
+│   ├── main.py              # FastAPI server (configure here)
+│   └── auth.py              # Firebase ID token verification dependency
 ├── public/                  # Static assets
 │   ├── fonts/
 │   │   └── *.otf           # Aeonik fonts
@@ -150,7 +157,8 @@ ui/
 │       └── *.png           # Images
 ├── src/                     # Source code
 │   ├── js/
-│   │   └── api-client.js   # JS API client
+│   │   ├── api-client.js   # JS API client (attaches Bearer token)
+│   │   └── auth.js         # Firebase sign-in gate
 │   └── css/
 │       └── styles.css      # Shared styles
 ├── index.html               # Chat UI (entry point)
@@ -162,11 +170,17 @@ ui/
 
 ### CORS Errors
 
-CORS is configured to allow all origins. For production, update:
+CORS defaults to allowing all origins. For production, set the `FRONTEND_ORIGINS` env var (comma-separated list) on the API server — no code change needed:
 
-```python
-allow_origins=["https://your-domain.com"]
+```bash
+FRONTEND_ORIGINS=https://research-demo.temporal.io
 ```
+
+### 401 / 403 from /api/* endpoints
+
+- `401 Missing or malformed Authorization header` → frontend isn't attaching a Bearer token. Confirm sign-in completed (sign-out button visible) and `auth.js` loaded without errors.
+- `401 Invalid Firebase ID token` → backend can't verify the token. Check the boot log for the `[auth] Firebase initialized ...` line; if it says `project ID only` but the project ID doesn't match the frontend `FIREBASE_CONFIG.projectId`, you have a mismatch.
+- `403 Access restricted to @temporal.io accounts` → user signed in with a non-Temporal Google account.
 
 ### Connection Refused
 

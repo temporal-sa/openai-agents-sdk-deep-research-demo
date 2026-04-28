@@ -44,6 +44,7 @@ This example is designed to be similar to the OpenAI Cookbook: [Introduction to 
 2. Temporal Server - Must be running locally on localhost:7233 OR Connect to [Temporal Cloud](https://temporal.io)
 3. **OpenAI API Key** - Set as environment variable `OPENAI_API_KEY` in .env file (note, you will need enough quota on in your [OpenAI account](https://platform.openai.com/api-keys) to run this demo)
 4. **PDF Generation Dependencies** - Required for PDF output (optional)
+5. **Firebase project** - Only required for deployed environments. The UI is gated by Google sign-in restricted to `@temporal.io` accounts. Local dev can bypass via `AUTH_DISABLED=true` in `.env`. See `.env-sample` for the full set of auth env vars.
 
 ## Install / Upgrade Temporal CLI
 You'll need the latest version to run the demo.
@@ -100,6 +101,13 @@ at the root of the repository. See the .env-sample file for details.
    # Add OpenAI API key in .env file (copy .env-sample to .env and update the OPENAI_API_KEY)
    OPENAI_API_KEY=''
    ```
+
+4. Configure authentication. For local dev, the simplest path is to bypass Firebase entirely:
+   ```bash
+   # In .env
+   AUTH_DISABLED=true
+   ```
+   For a deployed environment, populate `FIREBASE_PROJECT_ID` (and optionally `GOOGLE_APPLICATION_CREDENTIALS`) on the API server, and replace the `REPLACE_ME` values in `window.FIREBASE_CONFIG` at the top of `ui/index.html` and `ui/success.html` with the Firebase project's web config. Backend logs print which auth mode initialized at startup.
 
 ## Running the Demos
 
