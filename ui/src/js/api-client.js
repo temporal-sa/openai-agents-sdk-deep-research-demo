@@ -1,6 +1,21 @@
 // Research API Client
 // Handles communication with FastAPI backend
 
+async function authHeaders() {
+    // window.getIdToken is provided by ui/src/js/auth.js. If it's missing
+    // (auth.js failed to load) we still send the request so the user gets
+    // a clean 401 from the server rather than a JS error in the console.
+    if (typeof window === 'undefined' || typeof window.getIdToken !== 'function') {
+        return {};
+    }
+    try {
+        const token = await window.getIdToken();
+        return { 'Authorization': `Bearer ${token}` };
+    } catch (_) {
+        return {};
+    }
+}
+
 class ResearchClient {
     constructor(baseUrl = 'http://localhost:8233') {
         this.baseUrl = baseUrl;
@@ -13,6 +28,7 @@ class ResearchClient {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
+                ...(await authHeaders()),
             },
             body: JSON.stringify({ query })
         });
@@ -31,6 +47,7 @@ class ResearchClient {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
+                ...(await authHeaders()),
             },
             body: JSON.stringify({ query })
         });
@@ -48,8 +65,10 @@ class ResearchClient {
             throw new Error('No workflow ID available');
         }
 
-        const response = await fetch(`${this.baseUrl}/api/status/${id}`);
-        
+        const response = await fetch(`${this.baseUrl}/api/status/${id}`, {
+            headers: { ...(await authHeaders()) },
+        });
+
         if (!response.ok) {
             throw new Error('Failed to get status');
         }
@@ -67,6 +86,7 @@ class ResearchClient {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
+                ...(await authHeaders()),
             },
             body: JSON.stringify({ answer })
         });
@@ -84,8 +104,10 @@ class ResearchClient {
             throw new Error('No workflow ID available');
         }
 
-        const response = await fetch(`${this.baseUrl}/api/result/${id}`);
-        
+        const response = await fetch(`${this.baseUrl}/api/result/${id}`, {
+            headers: { ...(await authHeaders()) },
+        });
+
         if (!response.ok) {
             throw new Error('Result not ready or failed');
         }
@@ -93,7 +115,10 @@ class ResearchClient {
         return await response.json();
     }
 
-    // Server-Sent Events for live updates
+    // Server-Sent Events for live updates.
+    // NOTE: EventSource cannot send Authorization headers. When the backend
+    // /api/stream endpoint is implemented, switch to a query-string token or
+    // a fetch + ReadableStream so this stays authenticated.
     streamStatus(workflowId, onUpdate, onComplete, onError) {
         const id = workflowId || this.workflowId;
         if (!id) {

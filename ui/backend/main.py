@@ -13,11 +13,12 @@ Environment Variables:
 
 import os
 import uuid
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Dict, List, Optional
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import APIRouter, Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -34,6 +35,7 @@ from openai_agents.workflows.research_agents.research_models import (
     SingleClarificationInput,
     UserQueryInput,
 )
+from auth import _ensure_firebase_initialized, verify_firebase_user
 
 # Load environment variables
 load_dotenv()
@@ -53,20 +55,36 @@ def get_temporal_ui_base_url() -> str:
 # ============================================
 # FastAPI App Setup
 # ============================================
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Eagerly initialize Firebase so misconfigured deploys fail loudly at boot."""
+    if os.getenv("AUTH_DISABLED", "").lower() == "true":
+        print("[auth] AUTH_DISABLED=true — skipping Firebase initialization")
+    else:
+        _ensure_firebase_initialized()
+    yield
+
+
 app = FastAPI(
     title="Temporal Research API",
     description="Backend API for the Temporal Research Demo UI",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
-# CORS middleware for frontend
+# CORS middleware for frontend.
+# FRONTEND_ORIGINS is a comma-separated list set at deploy time; default "*" for dev.
+_frontend_origins = [o.strip() for o in os.getenv("FRONTEND_ORIGINS", "*").split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure for your domain in production
+    allow_origins=_frontend_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# All /api/* routes (except /api/health) are gated by Firebase auth.
+api = APIRouter(prefix="/api", dependencies=[Depends(verify_firebase_user)])
 
 # ============================================
 # Temporal Client Setup
@@ -159,7 +177,7 @@ app.mount("/temp_images", StaticFiles(directory=str(images_path)), name="images"
 # ============================================
 
 
-@app.post("/api/start-research")
+@api.post("/start-research")
 async def start_research(request: StartResearchRequest):
     """
     Start a new research workflow.
@@ -185,7 +203,7 @@ async def start_research(request: StartResearchRequest):
     }
 
 
-@app.post("/api/initialize/{workflow_id}")
+@api.post("/initialize/{workflow_id}")
 async def initialize_research(workflow_id: str, request: StartResearchRequest):
     """Send the start_research update to an already-started workflow."""
     client = await get_temporal_client()
@@ -198,7 +216,7 @@ async def initialize_research(workflow_id: str, request: StartResearchRequest):
     return {"status": "accepted"}
 
 
-@app.get("/api/status/{workflow_id}")
+@api.get("/status/{workflow_id}")
 async def get_status(workflow_id: str):
     """
     Get current workflow status.
@@ -230,7 +248,7 @@ async def get_status(workflow_id: str):
     return response
 
 
-@app.post("/api/answer/{workflow_id}/{current_question_index}")
+@api.post("/answer/{workflow_id}/{current_question_index}")
 async def submit_answer(
     workflow_id: str, current_question_index: int, request: AnswerRequest
 ):
@@ -267,7 +285,7 @@ async def submit_answer(
     )
 
 
-@app.get("/api/result/{workflow_id}")
+@api.get("/result/{workflow_id}")
 async def get_result(workflow_id: str):
     """
     Get final research result.
@@ -298,12 +316,16 @@ async def get_result(workflow_id: str):
     return result
 
 
-@app.get("/api/stream/{workflow_id}")
+@api.get("/stream/{workflow_id}")
 async def stream_status(workflow_id: str):
     """
     Server-Sent Events endpoint for live status updates.
 
     Streams status updates every second until workflow completes.
+
+    NOTE: When implemented, the EventSource API cannot send Authorization
+    headers, so the token will need to be passed as a short-lived query
+    parameter (or migrate to fetch + ReadableStream). See ui/src/js/auth.js.
     """
     # TODO: Implement SSE streaming with Temporal
     #
@@ -344,7 +366,7 @@ async def stream_status(workflow_id: str):
 
 @app.get("/api/health")
 async def health_check():
-    """Health check endpoint"""
+    """Health check endpoint (unauthenticated, used by k8s probes)."""
     return {
         "status": "healthy",
         # "temporal_profile": TEMPORAL_PROFILE,
@@ -352,6 +374,10 @@ async def health_check():
         "temporal_namespace": temporal_config.get("namespace"),
         "task_queue": TEMPORAL_TASK_QUEUE,
     }
+
+
+# Mount the authenticated API router after all routes are registered.
+app.include_router(api)
 
 
 # ============================================

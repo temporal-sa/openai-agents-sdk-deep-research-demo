@@ -131,3 +131,6 @@ Thumbs.db
 pdf_output/
 temp_images/
 *.pdf
+
+# Google - Firebase
+sa-demos-494716-*
